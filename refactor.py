@@ -2,38 +2,52 @@ import zipfile
 import os
 import plistlib
 import shutil
+from pathlib import Path
 
-# Inställningar för din IPA
-IPA_NAME = "AdBloX-MESH-v1.8.2 (3).ipa"
-OUT_NAME = "AdBloX-MESH-Electric.ipa"
-APP_PATH = "Payload/AdBloX.app"
+# Inställningar
+INPUT_IPA = "AdBloX-MESH-v1.8.2 (3).ipa"
+OUTPUT_IPA = "AdBloX-MESH-Branded.ipa"
+APP_NAME = "AdBloX.app"
 
 def refactor():
-    print(f"Extraherar {IPA_NAME}...")
-    with zipfile.ZipFile(IPA_NAME, 'r') as zip_ref:
+    if os.path.exists("extracted"):
+        shutil.rmtree("extracted")
+    
+    with zipfile.ZipFile(INPUT_IPA, 'r') as zip_ref:
         zip_ref.extractall("extracted")
 
-    # Sökväg till Info.plist
-    plist_path = os.path.join("extracted", APP_PATH, "Info.plist")
+    app_path = Path("extracted/Payload") / APP_NAME
+    app_info_path = app_path / "Info.plist"
     
-    if os.path.exists(plist_path):
-        print("Uppdaterar branding och färger i Info.plist...")
-        with open(plist_path, 'rb') as f:
-            pl = plistlib.load(f)
-        
-        # Injektion av Electric Blue och Branding
-        pl['CFBundleDisplayName'] = "AdBloX MESH"
-        pl['UIStatusBarStyle'] = "UIStatusBarStyleLightContent"
-        pl['AdBloX_Theme_Color'] = "#00EAFF"
-        
-        with open(plist_path, 'wb') as f:
-            plistlib.dump(pl, f)
+    # 1. Hämta huvud-ID
+    with open(app_info_path, 'rb') as f:
+        app_plist = plistlib.load(f)
+    
+    main_bundle_id = app_plist.get("CFBundleIdentifier", "com.adblox.mesh")
+    app_plist['CFBundleDisplayName'] = "AdBloX MESH"
+    app_plist['UIStatusBarStyle'] = "UIStatusBarStyleLightContent"
+    
+    with open(app_info_path, 'wb') as f:
+        plistlib.dump(app_plist, f)
 
-    # Packa ihop till en ny IPA
-    print(f"Skapar ny IPA: {OUT_NAME}...")
-    shutil.make_archive("branded_app", 'zip', "extracted")
-    os.rename("branded_app.zip", OUT_NAME)
-    print("Klart!")
+    # 2. Fixa Extension så den matchar (Viktigt för KravaSigner!)
+    ext_dir = app_path / "PlugIns"
+    if ext_dir.exists():
+        for ext in ext_dir.glob("*.appex"):
+            ext_info_path = ext / "Info.plist"
+            with open(ext_info_path, 'rb') as f:
+                ext_plist = plistlib.load(f)
+            
+            # Tvingar extension-ID att vara en del av huvudappen
+            ext_plist['CFBundleIdentifier'] = f"{main_bundle_id}.extension"
+            
+            with open(ext_info_path, 'wb') as f:
+                plistlib.dump(ext_plist, f)
+
+    # 3. Packa ihop
+    shutil.make_archive("temp_zip", 'zip', "extracted")
+    os.rename("temp_zip.zip", OUTPUT_IPA)
+    print(f"Refactor klar: {OUTPUT_IPA}")
 
 if __name__ == "__main__":
     refactor()
