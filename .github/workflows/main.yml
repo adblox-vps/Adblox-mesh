@@ -1,4 +1,4 @@
-name: AdBloX MESH Build
+name: AdBloX MESH for Sideloadly
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  refactor-sign-release:
+  build:
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -19,34 +19,26 @@ jobs:
 
       - name: Run Refactor
         run: |
-          # Vi hittar IPA-filen dynamiskt så namnet inte spelar roll
+          # Hittar din IPA och kör det unika Bundle ID-skriptet
           IPA_FILE=$(ls *.ipa | head -n 1)
           python3 refactor.py --input "$IPA_FILE" --output "AdBloX-MESH-Branded.ipa"
 
-      - name: Unpack and Hard Reset
+      - name: Prepare Clean Bundle
         run: |
           mkdir -p build
           unzip -q "AdBloX-MESH-Branded.ipa" -d build
-          # Rensar bort alla gamla signaturer så KravaSigner inte blir förvirrad
+          # VIKTIGT: Vi raderar ALLA gamla signaturer. 
+          # Sideloadly kommer injicera dina egna färska certifikat här.
           find build/Payload -name "_CodeSignature" -exec rm -rf {} +
+          find build/Payload -name "*.plist" -exec chmod 644 {} +
 
-      - name: Ad-hoc Sign Nested
-        run: |
-          APP_PATH="build/Payload/AdBloX.app"
-          # Signera VPN-motorn (Extension) först
-          if [ -d "$APP_PATH/PlugIns/AdBloXNetworkExtension.appex" ]; then
-            /usr/bin/codesign --force --deep --sign - "$APP_PATH/PlugIns/AdBloXNetworkExtension.appex"
-          fi
-          # Signera huvudappen
-          /usr/bin/codesign --force --deep --sign - "$APP_PATH"
-
-      - name: Rebuild Final IPA
+      - name: Package for Sideloadly
         run: |
           cd build
-          zip -qry "../AdBloX-MESH-Electric-Final.ipa" Payload/
+          zip -qry "../AdBloX-MESH-Sideloadly-Ready.ipa" Payload/
           
-      - name: Upload
+      - name: Upload to Actions
         uses: actions/upload-artifact@v4
         with:
-          name: AdBloX-MESH-Electric-Final
-          path: AdBloX-MESH-Electric-Final.ipa
+          name: AdBloX-Electric-Sideload-Ready
+          path: AdBloX-MESH-Sideloadly-Ready.ipa
