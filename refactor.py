@@ -1,53 +1,38 @@
-import zipfile
-import os
-import plistlib
-import shutil
+import zipfile, os, plistlib, shutil
 from pathlib import Path
 
-# Inställningar
-INPUT_IPA = "AdBloX-MESH-v1.8.2 (3).ipa"
-OUTPUT_IPA = "AdBloX-MESH-Branded.ipa"
-APP_NAME = "AdBloX.app"
-
 def refactor():
-    if os.path.exists("extracted"):
-        shutil.rmtree("extracted")
+    # Hitta IPA automatiskt
+    input_ipa = next(Path(".").glob("*.ipa"))
+    output_ipa = "AdBloX-MESH-Branded.ipa"
     
-    with zipfile.ZipFile(INPUT_IPA, 'r') as zip_ref:
-        zip_ref.extractall("extracted")
+    if os.path.exists("extracted"): shutil.rmtree("extracted")
+    with zipfile.ZipFile(input_ipa, 'r') as z: z.extractall("extracted")
 
-    app_path = Path("extracted/Payload") / APP_NAME
-    app_info_path = app_path / "Info.plist"
+    app_path = next(Path("extracted/Payload").glob("*.app"))
     
-    # 1. Hämta huvud-ID
-    with open(app_info_path, 'rb') as f:
-        app_plist = plistlib.load(f)
+    # Fixa Huvudappen
+    with open(app_path / "Info.plist", 'rb') as f:
+        pl = plistlib.load(f)
     
-    main_bundle_id = app_plist.get("CFBundleIdentifier", "com.adblox.mesh")
-    app_plist['CFBundleDisplayName'] = "AdBloX MESH"
-    app_plist['UIStatusBarStyle'] = "UIStatusBarStyleLightContent"
+    main_id = pl.get("CFBundleIdentifier", "com.adblox.mesh")
+    pl['CFBundleDisplayName'] = "AdBloX MESH"
     
-    with open(app_info_path, 'wb') as f:
-        plistlib.dump(app_plist, f)
+    with open(app_path / "Info.plist", 'wb') as f:
+        plistlib.dump(pl, f)
 
-    # 2. Fixa Extension så den matchar (Viktigt för KravaSigner!)
+    # Fixa VPN-motorn (Detta är vad som fixar ditt "Det gick inte att installera"-fel)
     ext_dir = app_path / "PlugIns"
     if ext_dir.exists():
         for ext in ext_dir.glob("*.appex"):
-            ext_info_path = ext / "Info.plist"
-            with open(ext_info_path, 'rb') as f:
-                ext_plist = plistlib.load(f)
-            
-            # Tvingar extension-ID att vara en del av huvudappen
-            ext_plist['CFBundleIdentifier'] = f"{main_bundle_id}.extension"
-            
-            with open(ext_info_path, 'wb') as f:
-                plistlib.dump(ext_plist, f)
+            with open(ext / "Info.plist", 'rb') as f:
+                e_pl = plistlib.load(f)
+            e_pl['CFBundleIdentifier'] = f"{main_id}.network" # Tvingar matchning
+            with open(ext / "Info.plist", 'wb') as f:
+                plistlib.dump(e_pl, f)
 
-    # 3. Packa ihop
-    shutil.make_archive("temp_zip", 'zip', "extracted")
-    os.rename("temp_zip.zip", OUTPUT_IPA)
-    print(f"Refactor klar: {OUTPUT_IPA}")
+    shutil.make_archive("out", 'zip', "extracted")
+    os.rename("out.zip", output_ipa)
 
 if __name__ == "__main__":
     refactor()
