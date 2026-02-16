@@ -1,34 +1,70 @@
-name: AdBloX MESH Build
-on: [push]
+name: Build AdBloX MESH Branded IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build:
+  refactor-sign-release:
     runs-on: macos-latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: "3.11"
 
       - name: Run Refactor Script
-        run: python3 refactor.py
-
-      - name: Ad-hoc Sign App
         run: |
-          # Signerar både huvudappen och nätverkstillägget
-          /usr/bin/codesign --force --deep --sign - "extracted/Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex"
-          /usr/bin/codesign --force --deep --sign - "extracted/Payload/AdBloX.app"
+          # Kör skriptet som ändrar färger och fixar Bundle IDs
+          python3 refactor.py \
+            --input "AdBloX-MESH-v1.8.2 (3).ipa" \
+            --output "AdBloX-MESH-Branded.ipa"
 
-      - name: Pack IPA
+      - name: Unpack for Signing
         run: |
-          cd extracted
-          zip -r ../AdBloX-MESH-Electric.ipa Payload
+          # Packa upp den brandade filen för att kunna signera om innehållet
+          mkdir -p build
+          unzip -q "AdBloX-MESH-Branded.ipa" -d build
+
+      - name: Hard Reset & Ad-hoc Sign
+        shell: bash
+        run: |
+          # 1. Radera gamla signaturer helt för att undvika krockar
+          find build/Payload -name "_CodeSignature" -exec rm -rf {} +
           
-      - name: Upload Result
+          # 2. Signera VPN-motorn (Extension) först - detta är kritiskt!
+          # Vi använder ad-hoc signering (-) som Sideloadly sedan kan skriva över
+          if [ -d "build/Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex" ]; then
+            /usr/bin/codesign --force --deep --sign - "build/Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex"
+          fi
+          
+          # 3. Signera huvudappen sist
+          /usr/bin/codesign --force --deep --sign - "build/Payload/AdBloX.app"
+
+      - name: Rebuild Final IPA
+        run: |
+          # Packa ihop allt till den slutgiltiga filen
+          cd build
+          zip -qry "../AdBloX-MESH-Electric-Final.ipa" Payload/
+          
+      - name: Upload Finished App
         uses: actions/upload-artifact@v4
         with:
-          name: AdBloX-MESH-Electric-App
-          path: AdBloX-MESH-Electric.ipa
+          name: AdBloX-MESH-Electric-Final
+          path: AdBloX-MESH-Electric-Final.ipa
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/heads/main')
+        with:
+          tag_name: "v1.8.2-electric-${{ github.run_number }}"
+          name: "AdBloX MESH Electric Build ${{ github.run_number }}"
+          files: "AdBloX-MESH-Electric-Final.ipa"
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
