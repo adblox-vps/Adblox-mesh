@@ -20,39 +20,36 @@ jobs:
 
       - name: Run Refactor Script
         run: |
-          # Kör skriptet som ändrar färger och fixar Bundle IDs
+          # Detta skript fixar färger och Bundle IDs så de matchar
           python3 refactor.py \
             --input "AdBloX-MESH-v1.8.2 (3).ipa" \
             --output "AdBloX-MESH-Branded.ipa"
 
-      - name: Unpack for Signing
+      - name: Unpack and Hard Reset Signatures
         run: |
-          # Packa upp den brandade filen för att kunna signera om innehållet
           mkdir -p build
           unzip -q "AdBloX-MESH-Branded.ipa" -d build
+          # Tar bort gamla signaturer som krockar med KravaSigner
+          find build/Payload -name "_CodeSignature" -exec rm -rf {} +
 
-      - name: Hard Reset & Ad-hoc Sign
+      - name: Ad-hoc Sign (Nested)
         shell: bash
         run: |
-          # 1. Radera gamla signaturer helt för att undvika krockar
-          find build/Payload -name "_CodeSignature" -exec rm -rf {} +
+          TARGET_APP="build/Payload/AdBloX.app"
+          EXTENSION="$TARGET_APP/PlugIns/AdBloXNetworkExtension.appex"
           
-          # 2. Signera VPN-motorn (Extension) först - detta är kritiskt!
-          # Vi använder ad-hoc signering (-) som Sideloadly sedan kan skriva över
-          if [ -d "build/Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex" ]; then
-            /usr/bin/codesign --force --deep --sign - "build/Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex"
+          # Signera inifrån och ut - ett måste för VPN-appar
+          if [ -d "$EXTENSION" ]; then
+            /usr/bin/codesign --force --deep --sign - "$EXTENSION"
           fi
-          
-          # 3. Signera huvudappen sist
-          /usr/bin/codesign --force --deep --sign - "build/Payload/AdBloX.app"
+          /usr/bin/codesign --force --deep --sign - "$TARGET_APP"
 
-      - name: Rebuild Final IPA
+      - name: Rebuild IPA
         run: |
-          # Packa ihop allt till den slutgiltiga filen
           cd build
           zip -qry "../AdBloX-MESH-Electric-Final.ipa" Payload/
           
-      - name: Upload Finished App
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AdBloX-MESH-Electric-Final
@@ -60,10 +57,10 @@ jobs:
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/heads/main')
+        if: github.ref == 'refs/heads/main'
         with:
-          tag_name: "v1.8.2-electric-${{ github.run_number }}"
-          name: "AdBloX MESH Electric Build ${{ github.run_number }}"
+          tag_name: "v1.8.2-blue-${{ github.run_number }}"
+          name: "AdBloX MESH Electric Final"
           files: "AdBloX-MESH-Electric-Final.ipa"
           prerelease: true
         env:
