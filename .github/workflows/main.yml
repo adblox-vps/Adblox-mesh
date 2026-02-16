@@ -1,44 +1,18 @@
-name: AdBloX MESH for Sideloadly
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+name: AdBloX MESH Build
+on: [push]
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest  # Snabbare för Python-jobb
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Run Refactor
-        run: |
-          # Hittar din IPA och kör det unika Bundle ID-skriptet
-          IPA_FILE=$(ls *.ipa | head -n 1)
-          python3 refactor.py --input "$IPA_FILE" --output "AdBloX-MESH-Branded.ipa"
+        run: python3 refactor.py
 
-      - name: Prepare Clean Bundle
-        run: |
-          mkdir -p build
-          unzip -q "AdBloX-MESH-Branded.ipa" -d build
-          # VIKTIGT: Vi raderar ALLA gamla signaturer. 
-          # Sideloadly kommer injicera dina egna färska certifikat här.
-          find build/Payload -name "_CodeSignature" -exec rm -rf {} +
-          find build/Payload -name "*.plist" -exec chmod 644 {} +
-
-      - name: Package for Sideloadly
-        run: |
-          cd build
-          zip -qry "../AdBloX-MESH-Sideloadly-Ready.ipa" Payload/
-          
-      - name: Upload to Actions
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: AdBloX-Electric-Sideload-Ready
-          path: AdBloX-MESH-Sideloadly-Ready.ipa
+          name: AdBloX-MESH-Electric-IPA
+          path: AdBloX-MESH-Electric.ipa
