@@ -9,25 +9,23 @@ def refactor():
     if os.path.exists("extracted"): shutil.rmtree("extracted")
     with zipfile.ZipFile(IPA_NAME, 'r') as z: z.extractall("extracted")
 
-    # Viktigt: Använd ditt Apple-ID-prefix eller liknande
+    # Unik grupp för ditt Apple-ID
     GROUP_ID = "group.com.hampuz.adblox"
     NEW_BUNDLE = "com.hampuz.adblox"
     NEW_EXT_BUNDLE = "com.hampuz.adblox.network"
 
-    paths = [APP_PATH, EXT_PATH]
-    ids = [NEW_BUNDLE, NEW_EXT_BUNDLE]
-
-    for path, b_id in zip(paths, ids):
+    # Uppdatera båda delarna
+    for path, b_id in [(APP_PATH, NEW_BUNDLE), (EXT_PATH, NEW_EXT_BUNDLE)]:
         p_list = os.path.join("extracted", path, "Info.plist")
         if os.path.exists(p_list):
             with open(p_list, 'rb') as f: pl = plistlib.load(f)
             pl['CFBundleIdentifier'] = b_id
             pl['CFBundleDisplayName'] = "AdBloX MESH"
-            # Skapa den delade gruppen som krävs för VPN
+            # Injektion av App Group - krävs för att tunneln ska svara
             pl['com.apple.security.application-groups'] = [GROUP_ID]
             with open(p_list, 'wb') as f: plistlib.dump(pl, f)
 
-    # Rensa signaturer
+    # Rensa signaturer så Sideloadly kan skriva nya utan krockar
     for r, d, f in os.walk("extracted"):
         if "_CodeSignature" in d: shutil.rmtree(os.path.join(r, "_CodeSignature"))
 
