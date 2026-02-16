@@ -1,4 +1,4 @@
-name: Build AdBloX MESH Branded IPA
+name: AdBloX MESH Build
 
 on:
   push:
@@ -8,9 +8,8 @@ on:
 jobs:
   refactor-sign-release:
     runs-on: macos-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -18,50 +17,36 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run Refactor Script
+      - name: Run Refactor
         run: |
-          # Detta skript fixar färger och Bundle IDs så de matchar
-          python3 refactor.py \
-            --input "AdBloX-MESH-v1.8.2 (3).ipa" \
-            --output "AdBloX-MESH-Branded.ipa"
+          # Vi hittar IPA-filen dynamiskt så namnet inte spelar roll
+          IPA_FILE=$(ls *.ipa | head -n 1)
+          python3 refactor.py --input "$IPA_FILE" --output "AdBloX-MESH-Branded.ipa"
 
-      - name: Unpack and Hard Reset Signatures
+      - name: Unpack and Hard Reset
         run: |
           mkdir -p build
           unzip -q "AdBloX-MESH-Branded.ipa" -d build
-          # Tar bort gamla signaturer som krockar med KravaSigner
+          # Rensar bort alla gamla signaturer så KravaSigner inte blir förvirrad
           find build/Payload -name "_CodeSignature" -exec rm -rf {} +
 
-      - name: Ad-hoc Sign (Nested)
-        shell: bash
+      - name: Ad-hoc Sign Nested
         run: |
-          TARGET_APP="build/Payload/AdBloX.app"
-          EXTENSION="$TARGET_APP/PlugIns/AdBloXNetworkExtension.appex"
-          
-          # Signera inifrån och ut - ett måste för VPN-appar
-          if [ -d "$EXTENSION" ]; then
-            /usr/bin/codesign --force --deep --sign - "$EXTENSION"
+          APP_PATH="build/Payload/AdBloX.app"
+          # Signera VPN-motorn (Extension) först
+          if [ -d "$APP_PATH/PlugIns/AdBloXNetworkExtension.appex" ]; then
+            /usr/bin/codesign --force --deep --sign - "$APP_PATH/PlugIns/AdBloXNetworkExtension.appex"
           fi
-          /usr/bin/codesign --force --deep --sign - "$TARGET_APP"
+          # Signera huvudappen
+          /usr/bin/codesign --force --deep --sign - "$APP_PATH"
 
-      - name: Rebuild IPA
+      - name: Rebuild Final IPA
         run: |
           cd build
           zip -qry "../AdBloX-MESH-Electric-Final.ipa" Payload/
           
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: AdBloX-MESH-Electric-Final
           path: AdBloX-MESH-Electric-Final.ipa
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main'
-        with:
-          tag_name: "v1.8.2-blue-${{ github.run_number }}"
-          name: "AdBloX MESH Electric Final"
-          files: "AdBloX-MESH-Electric-Final.ipa"
-          prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
