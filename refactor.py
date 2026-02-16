@@ -9,30 +9,25 @@ def refactor():
     if os.path.exists("extracted"): shutil.rmtree("extracted")
     with zipfile.ZipFile(IPA_NAME, 'r') as z: z.extractall("extracted")
 
-    # Nyckeln är att använda samma Team ID-struktur
+    # Viktigt: Använd ditt Apple-ID-prefix eller liknande
+    GROUP_ID = "group.com.hampuz.adblox"
     NEW_BUNDLE = "com.hampuz.adblox"
     NEW_EXT_BUNDLE = "com.hampuz.adblox.network"
 
-    # Fixa huvudappen
-    main_plist = os.path.join("extracted", APP_PATH, "Info.plist")
-    with open(main_plist, 'rb') as f: pl = plistlib.load(f)
-    pl['CFBundleIdentifier'] = NEW_BUNDLE
-    pl['CFBundleDisplayName'] = "AdBloX MESH"
-    # Ta bort gamla grupp-referenser som blockerar tunneln
-    pl.pop('com.apple.security.application-groups', None)
-    with open(main_plist, 'wb') as f: plistlib.dump(pl, f)
+    paths = [APP_PATH, EXT_PATH]
+    ids = [NEW_BUNDLE, NEW_EXT_BUNDLE]
 
-    # Fixa tunnel-motorn (Sideloadly behöver denna intakt)
-    ext_plist = os.path.join("extracted", EXT_PATH, "Info.plist")
-    if os.path.exists(ext_plist):
-        with open(ext_plist, 'rb') as f: e_pl = plistlib.load(f)
-        e_pl['CFBundleIdentifier'] = NEW_EXT_BUNDLE
-        # Denna rad är avgörande för att iOS ska tillåta tunnel-start
-        if 'NSExtension' in e_pl:
-            e_pl['NSExtension']['NSExtensionPointIdentifier'] = "com.apple.networkextension.packet-tunnel"
-        with open(ext_plist, 'wb') as f: plistlib.dump(e_pl, f)
+    for path, b_id in zip(paths, ids):
+        p_list = os.path.join("extracted", path, "Info.plist")
+        if os.path.exists(p_list):
+            with open(p_list, 'rb') as f: pl = plistlib.load(f)
+            pl['CFBundleIdentifier'] = b_id
+            pl['CFBundleDisplayName'] = "AdBloX MESH"
+            # Skapa den delade gruppen som krävs för VPN
+            pl['com.apple.security.application-groups'] = [GROUP_ID]
+            with open(p_list, 'wb') as f: plistlib.dump(pl, f)
 
-    # Rensa signaturer men BEHÅLL PlugIns-mappen
+    # Rensa signaturer
     for r, d, f in os.walk("extracted"):
         if "_CodeSignature" in d: shutil.rmtree(os.path.join(r, "_CodeSignature"))
 
