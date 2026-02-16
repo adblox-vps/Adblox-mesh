@@ -1,159 +1,34 @@
-#!/usr/bin/env python3
-"""Refactor AdBloX IPA branding while preserving signing identity inputs.
+name: AdBloX MESH Build
+on: [push]
 
-This script unpacks `AdBloX-MESH-v1.8.2 (3).ipa`, applies requested branding
-changes for Info.plists and text resources, preserves app/extension structure,
-and rebuilds `AdBloX-MESH-Electric.ipa` for downstream re-signing.
-"""
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-from __future__ import annotations
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-import argparse
-import plistlib
-import tempfile
-import zipfile
-from pathlib import Path
+      - name: Run Refactor Script
+        run: python3 refactor.py
 
-INPUT_IPA_DEFAULT = "AdBloX-MESH-v1.8.2 (3).ipa"
-OUTPUT_IPA_DEFAULT = "AdBloX-MESH-Electric.ipa"
-APP_RELATIVE = Path("Payload/AdBloX.app")
-EXT_RELATIVE = APP_RELATIVE / "PlugIns/AdBloXNetworkExtension.appex"
-ELECTRIC_BLUE = "#00EAFF"
-PLACEHOLDER = "Tailscale"
-BRAND_NAME = "AdBloX MESH"
-TEXT_EXTENSIONS = {".plist", ".strings", ".json", ".txt", ".xml", ".html", ".js", ".css", ".md", ".yml", ".yaml"}
+      - name: Ad-hoc Sign App
+        run: |
+          # Signerar både huvudappen och nätverkstillägget
+          /usr/bin/codesign --force --deep --sign - "extracted/Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex"
+          /usr/bin/codesign --force --deep --sign - "extracted/Payload/AdBloX.app"
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Refactor AdBloX IPA branding")
-    parser.add_argument("--input", default=INPUT_IPA_DEFAULT, help="Source IPA path")
-    parser.add_argument("--output", default=OUTPUT_IPA_DEFAULT, help="Branded IPA path")
-    return parser.parse_args()
-
-
-def extract_ipa(ipa_path: Path, destination: Path) -> None:
-    with zipfile.ZipFile(ipa_path, "r") as archive:
-        archive.extractall(destination)
-
-
-def read_plist(path: Path) -> dict:
-    with path.open("rb") as file_obj:
-        return plistlib.load(file_obj)
-
-
-def write_plist(path: Path, data: dict) -> None:
-    with path.open("wb") as file_obj:
-        plistlib.dump(data, file_obj, sort_keys=False)
-
-
-def replace_in_obj(value):
-    if isinstance(value, str):
-        return value.replace(PLACEHOLDER, BRAND_NAME)
-    if isinstance(value, list):
-        return [replace_in_obj(item) for item in value]
-    if isinstance(value, dict):
-        return {k: replace_in_obj(v) for k, v in value.items()}
-    return value
-
-
-def ensure_structure(extract_root: Path) -> tuple[Path, Path, Path, Path]:
-    app_dir = extract_root / APP_RELATIVE
-    ext_dir = extract_root / EXT_RELATIVE
-    app_info = app_dir / "Info.plist"
-    ext_info = ext_dir / "Info.plist"
-
-    if not app_dir.exists():
-        raise FileNotFoundError(f"Missing app bundle: {app_dir}")
-    if not ext_dir.exists():
-        raise FileNotFoundError(f"Missing extension bundle: {ext_dir}")
-    if not app_info.exists() or not ext_info.exists():
-        raise FileNotFoundError("Missing required Info.plist for app or extension")
-
-    app_profile = app_dir / "embedded.mobileprovision"
-    ext_profile = ext_dir / "embedded.mobileprovision"
-    if not app_profile.exists() and not ext_profile.exists():
-        raise FileNotFoundError("No embedded.mobileprovision found in app/extension bundle")
-
-    return app_info, ext_info, app_dir, ext_dir
-
-
-def apply_theme_and_branding(app_info_path: Path, ext_info_path: Path) -> None:
-    app_info = read_plist(app_info_path)
-    ext_info = read_plist(ext_info_path)
-
-    app_bundle = app_info.get("CFBundleIdentifier")
-    ext_bundle = ext_info.get("CFBundleIdentifier")
-    if not app_bundle or not ext_bundle:
-        raise ValueError("Missing CFBundleIdentifier in app or extension Info.plist")
-
-    # Validate relationship but keep identifiers intact.
-    if not ext_bundle.startswith(f"{app_bundle}."):
-        raise ValueError("Extension bundle identifier does not match app bundle prefix")
-
-    # Requested explicit theme keys for app Info.plist.
-    app_info["UIStatusBarStyle"] = "UIStatusBarStyleLightContent"
-    app_info["AdBloX_Theme_Color"] = ELECTRIC_BLUE
-
-    app_info = replace_in_obj(app_info)
-    ext_info = replace_in_obj(ext_info)
-
-    write_plist(app_info_path, app_info)
-    write_plist(ext_info_path, ext_info)
-
-
-def patch_text_files(app_dir: Path) -> None:
-    for path in app_dir.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS:
-            continue
-        if path.name == "Info.plist":
-            continue
-
-        raw = path.read_bytes()
-        replaced = raw
-
-        try:
-            text = raw.decode("utf-8")
-            updated = text.replace(PLACEHOLDER, BRAND_NAME)
-            if updated != text:
-                replaced = updated.encode("utf-8")
-        except UnicodeDecodeError:
-            # Skip undecodable files; avoid mutating binaries unsafely.
-            continue
-
-        if replaced != raw:
-            path.write_bytes(replaced)
-
-
-def repackage(extract_root: Path, output_ipa: Path) -> None:
-    if output_ipa.exists():
-        output_ipa.unlink()
-
-    with zipfile.ZipFile(output_ipa, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        payload_dir = extract_root / "Payload"
-        for path in sorted(payload_dir.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(extract_root))
-
-
-def main() -> None:
-    args = parse_args()
-    ipa_path = Path(args.input).resolve()
-    output_path = Path(args.output).resolve()
-
-    if not ipa_path.exists():
-        raise FileNotFoundError(f"Input IPA not found: {ipa_path}")
-
-    with tempfile.TemporaryDirectory(prefix="adblox-refactor-") as temp_dir:
-        root = Path(temp_dir)
-        extract_ipa(ipa_path, root)
-        app_info, ext_info, app_dir, _ext_dir = ensure_structure(root)
-        apply_theme_and_branding(app_info, ext_info)
-        patch_text_files(app_dir)
-        repackage(root, output_path)
-
-    print(f"Created branded IPA: {output_path}")
-
-
-if __name__ == "__main__":
-    main()
-
+      - name: Pack IPA
+        run: |
+          cd extracted
+          zip -r ../AdBloX-MESH-Electric.ipa Payload
+          
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdBloX-MESH-Electric-App
+          path: AdBloX-MESH-Electric.ipa
