@@ -3,15 +3,15 @@ import os
 import plistlib
 import shutil
 
+# Matchar exakt filen i ditt repo
 IPA_NAME = "AdBloX-MESH-v1.8.2 (3).ipa"
 OUT_NAME = "AdBloX-MESH-Electric.ipa"
 APP_PATH = "Payload/AdBloX.app"
 EXT_PATH = "Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex"
 
-# ÄNDRA DETTA till något personligt (inga mellanslag, bara bokstäver)
-MY_PREFIX = "hampuz" 
-NEW_BASE_BUNDLE = f"com.{MY_PREFIX}.adblox"
-NEW_EXT_BUNDLE = f"{NEW_BASE_BUNDLE}.network"
+# Anpassat för ditt Apple ID
+NEW_BUNDLE = "com.hampuz.adblox"
+NEW_EXT_BUNDLE = "com.hampuz.adblox.network"
 
 def refactor():
     print(f"Extraherar {IPA_NAME}...")
@@ -20,33 +20,36 @@ def refactor():
     with zipfile.ZipFile(IPA_NAME, 'r') as zip_ref:
         zip_ref.extractall("extracted")
 
-    # 1. Uppdatera Huvudappens Info.plist
+    # 1. Fixa Huvudapp (Info.plist)
     main_plist = os.path.join("extracted", APP_PATH, "Info.plist")
     with open(main_plist, 'rb') as f:
         pl = plistlib.load(f)
-    pl['CFBundleIdentifier'] = NEW_BASE_BUNDLE
+    pl['CFBundleIdentifier'] = NEW_BUNDLE
     pl['CFBundleDisplayName'] = "AdBloX MESH"
     with open(main_plist, 'wb') as f:
         plistlib.dump(pl, f)
 
-    # 2. Uppdatera Extensionens Info.plist
+    # 2. Fixa Extension (Info.plist)
     ext_plist = os.path.join("extracted", EXT_PATH, "Info.plist")
     if os.path.exists(ext_plist):
         with open(ext_plist, 'rb') as f:
             e_pl = plistlib.load(f)
         e_pl['CFBundleIdentifier'] = NEW_EXT_BUNDLE
-        # Viktigt: Koppla ihop dem i NSExtension-inställningarna
+        # Länka till huvudappen
         if 'NSExtension' in e_pl:
             e_pl['NSExtension']['NSExtensionPrincipalClass'] = "AdBloXNetworkExtension.PacketTunnelProvider"
         with open(ext_plist, 'wb') as f:
             plistlib.dump(e_pl, f)
 
-    # 3. Rensa gamla signaturer (Viktigt för Sideloadly!)
+    # 3. Rensa ALL gamla signaturer så Sideloadly kan skriva nya
     for root, dirs, files in os.walk("extracted"):
         if "_CodeSignature" in dirs:
             shutil.rmtree(os.path.join(root, "_CodeSignature"))
 
-    print(f"Klart! Ny Bundle ID: {NEW_BASE_BUNDLE}")
+    # 4. Packa ihop direkt i skriptet för att undvika YAML-fel
+    shutil.make_archive("AdBloX-MESH-Electric", 'zip', "extracted")
+    os.rename("AdBloX-MESH-Electric.zip", OUT_NAME)
+    print(f"Klart! Fil skapad: {OUT_NAME}")
 
 if __name__ == "__main__":
     refactor()
