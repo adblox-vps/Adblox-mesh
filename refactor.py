@@ -1,38 +1,52 @@
-import zipfile, os, plistlib, shutil
-from pathlib import Path
+import zipfile
+import os
+import plistlib
+import shutil
+
+IPA_NAME = "AdBloX-MESH-v1.8.2 (3).ipa"
+OUT_NAME = "AdBloX-MESH-Electric.ipa"
+APP_PATH = "Payload/AdBloX.app"
+EXT_PATH = "Payload/AdBloX.app/PlugIns/AdBloXNetworkExtension.appex"
+
+# ÄNDRA DETTA till något personligt (inga mellanslag, bara bokstäver)
+MY_PREFIX = "hampuz" 
+NEW_BASE_BUNDLE = f"com.{MY_PREFIX}.adblox"
+NEW_EXT_BUNDLE = f"{NEW_BASE_BUNDLE}.network"
 
 def refactor():
-    # Hitta IPA automatiskt
-    input_ipa = next(Path(".").glob("*.ipa"))
-    output_ipa = "AdBloX-MESH-Branded.ipa"
-    
-    if os.path.exists("extracted"): shutil.rmtree("extracted")
-    with zipfile.ZipFile(input_ipa, 'r') as z: z.extractall("extracted")
+    print(f"Extraherar {IPA_NAME}...")
+    if os.path.exists("extracted"):
+        shutil.rmtree("extracted")
+    with zipfile.ZipFile(IPA_NAME, 'r') as zip_ref:
+        zip_ref.extractall("extracted")
 
-    app_path = next(Path("extracted/Payload").glob("*.app"))
-    
-    # Fixa Huvudappen
-    with open(app_path / "Info.plist", 'rb') as f:
+    # 1. Uppdatera Huvudappens Info.plist
+    main_plist = os.path.join("extracted", APP_PATH, "Info.plist")
+    with open(main_plist, 'rb') as f:
         pl = plistlib.load(f)
-    
-    main_id = pl.get("CFBundleIdentifier", "com.adblox.mesh")
+    pl['CFBundleIdentifier'] = NEW_BASE_BUNDLE
     pl['CFBundleDisplayName'] = "AdBloX MESH"
-    
-    with open(app_path / "Info.plist", 'wb') as f:
+    with open(main_plist, 'wb') as f:
         plistlib.dump(pl, f)
 
-    # Fixa VPN-motorn (Detta är vad som fixar ditt "Det gick inte att installera"-fel)
-    ext_dir = app_path / "PlugIns"
-    if ext_dir.exists():
-        for ext in ext_dir.glob("*.appex"):
-            with open(ext / "Info.plist", 'rb') as f:
-                e_pl = plistlib.load(f)
-            e_pl['CFBundleIdentifier'] = f"{main_id}.network" # Tvingar matchning
-            with open(ext / "Info.plist", 'wb') as f:
-                plistlib.dump(e_pl, f)
+    # 2. Uppdatera Extensionens Info.plist
+    ext_plist = os.path.join("extracted", EXT_PATH, "Info.plist")
+    if os.path.exists(ext_plist):
+        with open(ext_plist, 'rb') as f:
+            e_pl = plistlib.load(f)
+        e_pl['CFBundleIdentifier'] = NEW_EXT_BUNDLE
+        # Viktigt: Koppla ihop dem i NSExtension-inställningarna
+        if 'NSExtension' in e_pl:
+            e_pl['NSExtension']['NSExtensionPrincipalClass'] = "AdBloXNetworkExtension.PacketTunnelProvider"
+        with open(ext_plist, 'wb') as f:
+            plistlib.dump(e_pl, f)
 
-    shutil.make_archive("out", 'zip', "extracted")
-    os.rename("out.zip", output_ipa)
+    # 3. Rensa gamla signaturer (Viktigt för Sideloadly!)
+    for root, dirs, files in os.walk("extracted"):
+        if "_CodeSignature" in dirs:
+            shutil.rmtree(os.path.join(root, "_CodeSignature"))
+
+    print(f"Klart! Ny Bundle ID: {NEW_BASE_BUNDLE}")
 
 if __name__ == "__main__":
     refactor()
